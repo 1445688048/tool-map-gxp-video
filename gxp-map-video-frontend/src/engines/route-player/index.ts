@@ -4,15 +4,15 @@ import { CameraEngine } from '../camera-engine'
 export type ProgressCallback = (point: TrackPoint, progress: number) => void
 export type CompleteCallback = () => void
 
-export type StepMode = 'off' | 'hill-skip' // hill-skip: skip flat/slight slope, accelerate on climbs/descents
+export type StepMode = 'off' | 'hill-skip'
 
 export interface StepConfig {
   mode: StepMode
-  hillSlopeThreshold: number  // slope % above which we accelerate
-  skipSlopeThreshold: number  // slope % below which we skip (flat)
-  hillSpeedMultiplier: number // speed multiplier on hills
-  skipSpeedMultiplier: number // speed multiplier on flat (high = fast-forward)
-  stepJumpSize: number        // meters to jump when skipping
+  hillSlopeThreshold: number
+  skipSlopeThreshold: number
+  hillSpeedMultiplier: number
+  skipSpeedMultiplier: number
+  stepJumpSize: number
 }
 
 const DEFAULT_STEP_CONFIG: StepConfig = {
@@ -21,10 +21,10 @@ const DEFAULT_STEP_CONFIG: StepConfig = {
   skipSlopeThreshold: 2,
   hillSpeedMultiplier: 3,
   skipSpeedMultiplier: 15,
-  stepJumpSize: 200, // 200m jump on flat sections
+  stepJumpSize: 200,
 }
 
-const BASE_SPEED_MPS = 1.5 // ~5.4 km/h walking speed
+const BASE_SPEED_MPS = 1.5
 
 export class RoutePlayer {
   private points: TrackPoint[] = []
@@ -61,7 +61,10 @@ export class RoutePlayer {
   getDistance() { return this.distance }
   getStepConfig() { return this.stepConfig }
 
-  setSpeed(s: number) { this.speed = s; this.stepConfig = { ...this.stepConfig } }
+  setSpeed(s: number) {
+    this.speed = s
+    this.stepConfig = { ...this.stepConfig }
+  }
   setStepMode(mode: StepMode) { this.stepConfig = { ...this.stepConfig, mode } }
   onProgress(cb: ProgressCallback) { this._onProgress = cb }
   onComplete(cb: CompleteCallback) { this._onComplete = cb }
@@ -109,17 +112,13 @@ export class RoutePlayer {
     const point = this.points[this.currentIndex]
     let speedMultiplier = this.speed
 
-    // Step-jump logic: apply different speed based on slope
     if (this.stepConfig.mode === 'hill-skip' && point) {
       const slope = point.slope
       if (slope > this.stepConfig.hillSlopeThreshold) {
-        // Climbing: slow down slightly for drama
         speedMultiplier = this.speed * 0.8
       } else if (Math.abs(slope) < this.stepConfig.skipSlopeThreshold) {
-        // Flat: fast-forward (skip)
         speedMultiplier = this.speed * this.stepConfig.skipSpeedMultiplier
       } else {
-        // Moderate slope: normal-ish
         speedMultiplier = this.speed * 2
       }
     }
@@ -146,7 +145,8 @@ export class RoutePlayer {
   private updateCamera() {
     if (this.points.length < 2) return
     const state = this.camera.getState(this.points, this.currentIndex)
-    this.camera.jump(state)
+    // Use easeTo for smooth transitions (300ms)
+    this.camera.apply(state, 300)
   }
 
   private calcCumulativeDistances(points: TrackPoint[]): number[] {

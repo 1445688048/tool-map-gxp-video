@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Cache manages tile storage and retrieval
 type Cache struct {
 	baseDir string
 	client  *http.Client
@@ -36,11 +35,10 @@ func NewCache(baseDir string) *Cache {
 	os.MkdirAll(baseDir, 0755)
 	return &Cache{
 		baseDir: baseDir,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Get serves a tile from cache or fetches from source
 func (c *Cache) Get(provider string, z, x, y int) ([]byte, error) {
 	providerInfo, ok := providers[provider]
 	if !ok {
@@ -49,12 +47,10 @@ func (c *Cache) Get(provider string, z, x, y int) ([]byte, error) {
 
 	cachePath := filepath.Join(c.baseDir, provider, fmt.Sprintf("%d", z), fmt.Sprintf("%d", x), fmt.Sprintf("%d.png", y))
 
-	// Check cache
 	if data, err := os.ReadFile(cachePath); err == nil {
 		return data, nil
 	}
 
-	// Fetch from source
 	url := fmt.Sprintf(providerInfo.url, z, x, y)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -79,17 +75,14 @@ func (c *Cache) Get(provider string, z, x, y int) ([]byte, error) {
 		return nil, err
 	}
 
-	// Save to cache
 	dir := filepath.Dir(cachePath)
 	os.MkdirAll(dir, 0755)
 	if err := os.WriteFile(cachePath, data, 0644); err != nil {
-		// Don't fail if cache write fails
 	}
 
 	return data, nil
 }
 
-// CheckMissing returns tiles that are not in cache
 func (c *Cache) CheckMissing(provider string, tiles [][3]int) ([][3]int, error) {
 	var missing [][3]int
 	for _, t := range tiles {
@@ -101,7 +94,6 @@ func (c *Cache) CheckMissing(provider string, tiles [][3]int) ([][3]int, error) 
 	return missing, nil
 }
 
-// DownloadTiles downloads missing tiles in parallel
 func (c *Cache) DownloadTiles(provider string, tiles [][3]int, concurrency int) error {
 	if len(tiles) == 0 {
 		return nil
@@ -140,7 +132,6 @@ func (c *Cache) DownloadTiles(provider string, tiles [][3]int, concurrency int) 
 	return nil
 }
 
-// BaseDir returns the cache base directory path
 func (c *Cache) BaseDir() string {
 	return c.baseDir
 }

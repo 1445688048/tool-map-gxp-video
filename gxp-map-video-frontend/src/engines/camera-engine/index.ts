@@ -67,9 +67,16 @@ export class CameraEngine {
     }
   }
 
-  apply(state: CameraState, duration = 0) {
+  apply(state: CameraState, duration = 300) {
     if (!this.map) return
-    this.map.easeTo({ center: state.center, zoom: state.zoom, pitch: state.pitch, bearing: state.bearing, duration, essential: true })
+    this.map.easeTo({
+      center: state.center,
+      zoom: state.zoom,
+      pitch: state.pitch,
+      bearing: state.bearing,
+      duration,
+      essential: true,
+    })
   }
 
   jump(state: CameraState) {

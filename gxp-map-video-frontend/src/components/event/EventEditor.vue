@@ -60,6 +60,10 @@ onMounted(() => {
   if (props.routeId) loadEvents(props.routeId)
 })
 
+function showToast(msg: string, type: 'info' | 'error' | 'success' = 'info') {
+  window.dispatchEvent(new CustomEvent('gxp-toast', { detail: { message: msg, type } }))
+}
+
 async function loadEvents(routeId: number) {
   events.value = await api.getEvents(routeId) as StoryEvent[]
 }
@@ -102,7 +106,7 @@ async function saveEvent(ev?: StoryEvent) {
       emit('eventChanged', updated)
       cancelEdit()
     } catch (e) {
-      alert('保存失败: ' + (e instanceof Error ? e.message : String(e)))
+      showToast('保存失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
     }
   } else {
     // Create new at current playback position or midpoint
@@ -115,7 +119,7 @@ async function saveEvent(ev?: StoryEvent) {
       emit('eventChanged', created)
       cancelEdit()
     } catch (e) {
-      alert('创建失败: ' + (e instanceof Error ? e.message : String(e)))
+      showToast('创建失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
     }
   }
 }
@@ -127,7 +131,7 @@ async function deleteEvent(id: number) {
     events.value = events.value.filter(e => e.id !== id)
     cancelEdit()
   } catch (e) {
-    alert('删除失败')
+    showToast('删除失败', 'error')
   }
 }
 

@@ -23,6 +23,10 @@ const isDragging = ref(false)
 const uploading = ref(false)
 const routeStore = useRouteStore()
 
+function showToast(msg: string, type: 'info' | 'error' | 'success' = 'info') {
+  window.dispatchEvent(new CustomEvent('gxp-toast', { detail: { message: msg, type } }))
+}
+
 function onClick() {
   input.value?.click()
 }
@@ -52,7 +56,7 @@ async function handleFile(file: File) {
     const route = await routeStore.uploadGPX(file)
     emit('loaded', route)
   } catch (err) {
-    alert('上传失败: ' + (err instanceof Error ? err.message : String(err)))
+    showToast('上传失败: ' + (err instanceof Error ? err.message : String(err), 'error'))
   } finally {
     uploading.value = false
   }

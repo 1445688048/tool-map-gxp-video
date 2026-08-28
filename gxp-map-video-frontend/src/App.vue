@@ -26,9 +26,10 @@
       <!-- Map -->
       <MapContainer ref="mapContainerRef" />
 
-      <!-- Right panel: Events -->
+      <!-- Right panel: Events + Intro/Outro -->
       <div v-if="showEvents" class="right-panel">
         <EventEditor :route-id="currentRouteId" @event-changed="onEventChanged" />
+        <IntroOutroConfig ref="introOutroRef" />
       </div>
 
       <!-- Overlay -->
@@ -100,6 +101,13 @@
         <span>{{ ((player?.getDistance() ?? 0) / 1000).toFixed(2) }} / {{ (totalDistance / 1000).toFixed(1) }} km</span>
       </div>
     </footer>
+
+    <!-- Toast notifications -->
+    <Teleport to="body">
+      <div v-if="toast.show" :class="['toast', toast.type]">
+        {{ toast.message }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -110,6 +118,7 @@ import SegmentList from './components/segment/SegmentList.vue'
 import EventEditor from './components/event/EventEditor.vue'
 import TimelineEditor from './components/timeline/TimelineEditor.vue'
 import RouteOverlay from './components/overlay/RouteOverlay.vue'
+import IntroOutroConfig from './components/intro-outro/IntroOutroConfig.vue'
 import { useRouteStore } from './stores/route'
 import { usePlaybackStore } from './stores/playback'
 import { CameraEngine } from './engines/camera-engine'
@@ -125,38 +134,47 @@ const showSegments = ref(true)
 const showEvents = ref(false)
 const segments = ref<RouteSegment[]>([])
 const events = ref<StoryEvent[]>([])
+const introOutroRef = ref<InstanceType<typeof IntroOutroConfig> | null>(null)
 
 const hasRoute = computed(() => routeStore.currentRoute !== null)
 const currentRouteId = computed(() => routeStore.currentRoute?.id ?? null)
 const totalDistance = computed(() => routeStore.currentRoute?.total_distance ?? 0)
 const isPlaying = computed(() => playbackStore.isPlaying)
-
 const cameraAlt = ref(100)
 const cameraPitch = ref(60)
 const speed = ref(1)
-const seekPos = ref(0)
 const stepMode = ref<'off' | 'hill-skip'>('off')
+const seekPos = ref(0)
 
+let mapContainerRef: any = null
 let cameraEngine: CameraEngine | null = null
 let routePlayer: RoutePlayer | null = null
+const player = computed(() => routePlayer)
+
+const canPlay = computed(() => hasRoute.value && routePlayer !== null)
+
+// Toast notification system (replaces alert())
+const toast = ref({ show: false, message: '', type: 'info' as 'info' | 'error' | 'success' })
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(message: string, type: 'info' | 'error' | 'success' = 'info') {
+  toast.value = { show: true, message, type }
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value.show = false }, 3000)
+}
 
 watch(() => routeStore.trackPoints, (pts) => {
+  if (pts.length < 2) return
   if (!cameraEngine) {
     cameraEngine = new CameraEngine()
     routePlayer = new RoutePlayer(cameraEngine)
+    routePlayer.onComplete(() => {
+      playbackStore.phase = 'ended'
+    })
   }
-  if (pts.length > 0) {
-    routePlayer!.setPoints(pts)
-    cameraEngine!.setSettings({ altitude: cameraAlt.value, pitch: cameraPitch.value })
-  }
-}, { deep: true })
-
-watch([cameraAlt, cameraPitch], ([alt, pitch]) => {
-  if (cameraEngine) cameraEngine.setSettings({ altitude: alt, pitch })
+  if (!routePlayer) return
+  routePlayer.setPoints(pts)
+  cameraEngine.setSettings({ altitude: cameraAlt.value, pitch: cameraPitch.value })
 })
-
-const canPlay = computed(() => hasRoute.value && routePlayer !== null)
-const player = computed(() => routePlayer)
 
 function togglePlay() {
   if (!routePlayer) return
@@ -164,8 +182,8 @@ function togglePlay() {
     routePlayer.pause()
     playbackStore.pause()
   } else {
-    routePlayer.play()
-    playbackStore.play()
+    playbackStore.phase = 'playing'
+    if (routePlayer) { routePlayer.play(); playbackStore.play() }
     const poll = setInterval(() => {
       if (!playbackStore.isPlaying) { clearInterval(poll); return }
       if (routePlayer) seekPos.value = routePlayer.getDistance()
@@ -178,6 +196,7 @@ function stop() {
   routePlayer?.stop()
   playbackStore.pause()
   playbackStore.seekTo(0)
+  playbackStore.phase = 'idle'
 }
 
 function reset() { stop() }
@@ -190,28 +209,35 @@ function onStepModeChange() {
   if (routePlayer) routePlayer.setStepMode(stepMode.value)
 }
 
-function onTimelineSeek(dist: number) {
+watch([cameraAlt, cameraPitch], ([alt, pitch]) => {
+  if (cameraEngine) cameraEngine.setSettings({ altitude: alt, pitch })
+})
+
+watch(seekPos, (val) => {
   if (routePlayer) {
-    routePlayer.seekTo(dist)
+    routePlayer.seekTo(val)
     playbackStore.seekTo(routePlayer.progress)
   }
-}
+})
 
 async function autoAnalyze() {
   if (!currentRouteId.value) return
   analyzing.value = true
   try {
-    const result = await routeStore.$state as any
-    segments.value = await (window as any).api?.getSegments?.(currentRouteId.value) ?? []
+    segments.value = await (await fetch(`/api/routes/${currentRouteId.value}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset: activePreset.value }),
+    })).json()
+    showToast(`分析完成，共 ${segments.value.length} 个分段`, 'success')
   } catch (e) {
-    // Will be loaded by SegmentList component
+    showToast('分析失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
   } finally {
     analyzing.value = false
   }
 }
 
 function generateCommentary() {
-  // Rule-based commentary generation
   if (segments.value.length === 0) return
   let updated = false
   for (const seg of segments.value) {
@@ -220,13 +246,7 @@ function generateCommentary() {
     updated = true
   }
   if (updated) {
-    // Save all updated segments
-    for (const seg of segments.value) {
-      if (seg.id && seg.commentary) {
-        // Update in backend
-        ;(window as any).__lastSegments = segments.value
-      }
-    }
+    showToast('解说模板已生成，请手动保存修改', 'info')
   }
 }
 
@@ -257,22 +277,28 @@ function onEventChanged(ev: StoryEvent) {
   else events.value.push(ev)
 }
 
-// Watch for route changes to load segments/events
+function onTimelineSeek(dist: number) {
+  if (routePlayer) {
+    routePlayer.seekTo(dist)
+    playbackStore.seekTo(routePlayer.progress)
+  }
+}
+
 watch(currentRouteId, async (id) => {
-  if (!id) { segments.value = []; events.value = [] ; return }
+  if (!id) { segments.value = []; events.value = []; return }
   try {
-    segments.value = await fetch(`/api/routes/${id}/segments`).then(r => r.json())
-  } catch {}
+    segments.value = await (await fetch(`/api/routes/${id}/segments`)).json()
+  } catch { segments.value = [] }
   try {
-    events.value = await fetch(`/api/routes/${id}/events`).then(r => r.json())
-  } catch {}
+    events.value = await (await fetch(`/api/routes/${id}/events`)).json()
+  } catch { events.value = [] }
 })
 </script>
 
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; }
-.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; position: relative; }
 .toolbar { padding: 10px 20px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; align-items: center; justify-content: space-between; }
 .toolbar h1 { font-size: 16px; font-weight: 600; color: #e94560; }
 .toolbar-right { display: flex; align-items: center; gap: 10px; }
@@ -283,7 +309,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-commentary { background: #533483; color: #eee; border: none; padding: 5px 12px; border-radius: 5px; font-size: 12px; cursor: pointer; }
 .main { flex: 1; display: flex; position: relative; overflow: hidden; }
 .left-panel { position: absolute; left: 0; top: 0; bottom: 0; z-index: 5; }
-.right-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; }
+.right-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; display: flex; flex-direction: column; }
 .controls { padding: 8px 20px; background: #16213e; border-top: 1px solid #0f3460; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .btn-play { width: 38px; height: 30px; border-radius: 6px; font-size: 15px; cursor: pointer; border: 1px solid #0f3460; background: #0f3460; color: #eee; }
 .btn-play:hover:not(:disabled) { background: #e94560; border-color: #e94560; }
@@ -298,4 +324,9 @@ select.select { background: #0f3460; color: #eee; border: none; padding: 3px 6px
 .btn-toggle { background: transparent; color: #8899aa; border: 1px solid #0f3460; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
 .btn-toggle.active { background: #0f3460; color: #e94560; border-color: #e94560; }
 .progress-info { color: #4ecca3; font-size: 12px; margin-left: auto; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); padding: 8px 20px; border-radius: 6px; font-size: 13px; z-index: 9999; animation: fadeIn 0.2s; }
+.toast.info { background: #0f3460; color: #eee; }
+.toast.error { background: #e94560; color: #fff; }
+.toast.success { background: #4ecca3; color: #16213e; }
+@keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 </style>

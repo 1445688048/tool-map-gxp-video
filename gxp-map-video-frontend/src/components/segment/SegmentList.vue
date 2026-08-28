@@ -74,6 +74,10 @@ onMounted(() => {
   if (props.routeId) loadSegments(props.routeId)
 })
 
+function showToast(msg: string, type: 'info' | 'error' | 'success' = 'info') {
+  window.dispatchEvent(new CustomEvent('gxp-toast', { detail: { message: msg, type } }))
+}
+
 async function loadSegments(routeId: number) {
   loading.value = true
   try {
@@ -92,7 +96,7 @@ async function analyze() {
     const result = await api.analyzeRoute(props.routeId, activePreset.value)
     segments.value = result as RouteSegment[]
   } catch (e) {
-    alert('分析失败: ' + (e instanceof Error ? e.message : String(e)))
+    showToast('分析失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
   } finally {
     analyzing.value = false
   }
@@ -126,7 +130,7 @@ async function saveSegment(seg: RouteSegment) {
     editingCommentary.value = ''
     emit('segmentUpdated', updated)
   } catch (e) {
-    alert('保存失败: ' + (e instanceof Error ? e.message : String(e)))
+    showToast('保存失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
   }
 }
 

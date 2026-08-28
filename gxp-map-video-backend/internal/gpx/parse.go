@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"gxp-map-video-backend/internal/tile"
 )
 
 type RawPoint struct {
@@ -92,7 +94,7 @@ func computeStats(points []RawPoint) *ParseResult {
 
 	var cumDist, ascent, descent float64
 	for i := 1; i < len(points); i++ {
-		dist := haversine(points[i-1].Lat, points[i-1].Lng, points[i].Lat, points[i].Lng)
+		dist := tile.Haversine(points[i-1].Lat, points[i-1].Lng, points[i].Lat, points[i].Lng)
 		cumDist += dist
 		if hasElevation {
 			d := points[i].Ele - points[i-1].Ele
@@ -123,14 +125,4 @@ func computeStats(points []RawPoint) *ParseResult {
 		}
 	}
 	return result
-}
-
-func haversine(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371000
-	dLat := (lat2 - lat1) * math.Pi / 180
-	dLon := (lon2 - lon1) * math.Pi / 180
-	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
-		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
-			math.Sin(dLon/2)*math.Sin(dLon/2)
-	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }

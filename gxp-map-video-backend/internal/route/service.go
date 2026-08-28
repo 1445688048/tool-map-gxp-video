@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"gxp-map-video-backend/internal/gpx"
+	"gxp-map-video-backend/internal/tile"
 )
 
 // Service handles route operations
@@ -15,17 +16,15 @@ func NewService(db *DB) *Service {
 	return &Service{db: db}
 }
 
-// CreateFromGPX parses a GPX file and creates a Route with TrackPoints
+// CreateFromGPX parses a GPX file and creates a Route with TrackPoints.
 func (s *Service) CreateFromGPX(name, gpxPath string, data []byte) (*Route, error) {
 	result, err := gpx.Parse(data)
 	if err != nil {
 		return nil, err
 	}
 
-	// Smooth elevation using moving average (window=5)
 	smoothed := smoothElevation(result.Points, 5)
 
-	// Build route
 	route := &Route{
 		Name:           name,
 		GPXPath:        gpxPath,
@@ -41,27 +40,25 @@ func (s *Service) CreateFromGPX(name, gpxPath string, data []byte) (*Route, erro
 		PointCount:     len(result.Points),
 	}
 
-	// Build track points with distance and slope
 	points := make([]TrackPoint, len(smoothed))
 	var cumDist float64
 
 	for i, p := range smoothed {
 		points[i] = TrackPoint{
-			RouteID:    0, // set after insert
+			RouteID:    0,
 			Index:      i,
 			Latitude:   p.Lat,
 			Longitude:  p.Lng,
 			Elevation:  p.Ele,
 			Distance:   math.Round(cumDist*1000) / 1000,
-			Slope:      0, // computed below
+			Slope:      0,
 			Time:       p.Time,
 		}
 		if i > 0 {
 			prev := smoothed[i-1]
-			dist := haversine(prev.Lat, prev.Lng, p.Lat, p.Lng)
+			dist := tile.Haversine(prev.Lat, prev.Lng, p.Lat, p.Lng)
 			cumDist += dist
 			points[i].Distance = math.Round(cumDist*1000) / 1000
-			// slope = elevation_delta / horizontal_distance * 100
 			elevDiff := p.Ele - prev.Ele
 			if dist > 0 {
 				points[i].Slope = math.Round(elevDiff/dist*100*100) / 100
@@ -69,12 +66,10 @@ func (s *Service) CreateFromGPX(name, gpxPath string, data []byte) (*Route, erro
 		}
 	}
 
-	// Save route
 	if err := s.db.CreateRoute(route); err != nil {
 		return nil, err
 	}
 
-	// Set route ID and save points in batches
 	for i := range points {
 		points[i].RouteID = route.ID
 	}
@@ -82,7 +77,6 @@ func (s *Service) CreateFromGPX(name, gpxPath string, data []byte) (*Route, erro
 		return nil, err
 	}
 
-	// Refresh route with count
 	s.db.DB.Model(route).Update("point_count", len(points))
 	s.db.DB.First(route, route.ID)
 
@@ -109,18 +103,7 @@ func (s *Service) Delete(id uint) error {
 	return s.db.DeleteRoute(id)
 }
 
-// haversine same as in parse.go
-func haversine(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371000
-	dLat := (lat2 - lat1) * math.Pi / 180
-	dLon := (lon2 - lon1) * math.Pi / 180
-	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
-		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
-			math.Sin(dLon/2)*math.Sin(dLon/2)
-	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-}
-
-// smoothElevation applies a moving average to elevation values
+// smoothElevation applies a moving average to elevation values.
 func smoothElevation(points []gpx.RawPoint, window int) []gpx.RawPoint {
 	if len(points) <= window {
 		return points

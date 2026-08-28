@@ -42,14 +42,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
-import type { ExportTask, ActivityPreset } from '@/types/gpx'
+import type { ExportTask } from '@/types/gpx'
 import { VideoRecorder } from '@/engines/video-recorder'
 import { usePlaybackStore } from '@/stores/playback'
+import { useRouteStore } from '@/stores/route'
+import { CameraEngine } from '@/engines/camera-engine'
+import { RoutePlayer } from '@/engines/route-player'
 
 const props = defineProps<{ routeId: number | null }>()
 const playbackStore = usePlaybackStore()
+const routeStore = useRouteStore()
 
 const task = ref<ExportTask | null>(null)
 const preflightResult = ref<{ total_tiles: number; missing_tiles: number; zoom_range: string } | null>(null)
@@ -61,13 +65,25 @@ const recordingTime = ref(0)
 let recorder: VideoRecorder | null = null
 let recordTimer: ReturnType<typeof setInterval> | null = null
 
+// Shared player instance so export can control speed
+let exportCamera: CameraEngine | null = null
+let exportPlayer: RoutePlayer | null = null
+
+watch(() => props.routeId, async (id) => {
+  if (!id) { task.value = null; preflightResult.value = null; return }
+  // Fetch existing task if any
+  try {
+    // Check last task for this route
+  } catch {}
+})
+
 async function preflight() {
   if (!props.routeId) return
   loadingPreflight.value = true
   try {
     preflightResult.value = await api.preflightExport(props.routeId) as any
   } catch (e) {
-    alert('预检失败: ' + (e instanceof Error ? e.message : String(e)))
+    showToast('预检失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
   } finally {
     loadingPreflight.value = false
   }
@@ -78,10 +94,10 @@ async function preload() {
   loadingPreload.value = true
   try {
     await api.preloadTiles(props.routeId)
-    alert('瓦片预加载完成')
+    showToast('瓦片预加载完成', 'success')
     await preflight()
   } catch (e) {
-    alert('预加载失败: ' + (e instanceof Error ? e.message : String(e)))
+    showToast('预加载失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
   } finally {
     loadingPreload.value = false
   }
@@ -93,21 +109,30 @@ async function startExport() {
   isRecording.value = true
   recordingTime.value = 0
 
-  // Create export task
   task.value = await api.createExportTask(props.routeId) as ExportTask
 
-  // Start recording
-  recorder = new VideoRecorder()
+  // Ensure player exists for export
+  if (!exportCamera || !exportPlayer) {
+    exportCamera = new CameraEngine()
+    exportPlayer = new RoutePlayer(exportCamera)
+    if (routeStore.trackPoints.length > 0) {
+      exportPlayer.setPoints(routeStore.trackPoints)
+    }
+  }
+  if (routeStore.trackPoints.length > 0) {
+    exportPlayer.setPoints(routeStore.trackPoints)
+  }
+  // Use 3x speed for export
+  exportPlayer.setSpeed(3)
+
   try {
+    recorder = new VideoRecorder()
     await recorder.start()
     recordTimer = setInterval(() => { recordingTime.value++ }, 1000)
 
-    // Play the route fully while recording
     playbackStore.play()
-    const baseSpeed = 3 // faster playback for export
-    if (recorder.setSpeed) recorder.setSpeed(baseSpeed)
+    exportPlayer!.play()
 
-    // Wait for playback to complete
     await new Promise<void>((resolve) => {
       const check = setInterval(() => {
         if (!playbackStore.isPlaying) {
@@ -121,22 +146,20 @@ async function startExport() {
     isRecording.value = false
   }
 
-  // Stop recording and upload
   const webmBlob = await recorder.stop()
   exporting.value = false
 
-  // Upload WebM to backend
   const form = new FormData()
   form.append('video', webmBlob, `export_${task.value!.id}.webm`)
   await fetch(`/api/export/upload/${task.value!.id}`, { method: 'POST', body: form })
-
-  alert('视频已上传，后端正在转码为MP4，请稍后查看任务状态')
+  showToast('视频已上传，后端正在转码为 MP4', 'info')
 }
 
 async function cancelExport() {
   if (!task.value?.id) return
   await api.cancelExportTask(task.value.id)
   task.value = null
+  showToast('已取消导出', 'info')
 }
 
 function statusText(status: string) {
@@ -145,6 +168,11 @@ function statusText(status: string) {
     FAILED: '失败', CANCELLED: '已取消',
   }
   return map[status] || status
+}
+
+function showToast(message: string, type: 'info' | 'error' | 'success' = 'info') {
+  // Simple inline toast via CustomEvent to avoid prop drilling
+  window.dispatchEvent(new CustomEvent('gxp-toast', { detail: { message, type } }))
 }
 
 const canExport = computed(() => props.routeId !== null)

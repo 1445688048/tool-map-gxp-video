@@ -17,13 +17,19 @@ type Database struct {
 
 func New(path string) (*Database, error) {
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	// Auto migrate models
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get sql db: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(5)
+
 	if err := db.AutoMigrate(
 		&route.Route{},
 		&route.TrackPoint{},
@@ -45,7 +51,6 @@ func (d *Database) Close() error {
 	return sqlDB.Close()
 }
 
-// HealthCheck simple health check
 func (d *Database) HealthCheck() error {
 	sqlDB, err := d.DB.DB()
 	if err != nil {
@@ -54,7 +59,6 @@ func (d *Database) HealthCheck() error {
 	return sqlDB.Ping()
 }
 
-// Now returns current time
 func Now() time.Time {
 	return time.Now()
 }

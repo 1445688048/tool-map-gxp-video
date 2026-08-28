@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,12 +46,12 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB, tileCache *tile.Cache, dataDir s
 			routes.DELETE("/:id", h.DeleteRoute)
 			routes.POST("/:id/analyze", h.AnalyzeRoute)
 			routes.GET("/:id/segments", h.GetSegments)
-			routes.PUT("/segments/:sid", h.UpdateSegment)
+			routes.PUT("/segments/:id", h.UpdateSegment)
 			routes.POST("/:id/segments/regenerate", h.RegenerateSegments)
 			routes.POST("/:id/events", h.CreateEvent)
 			routes.GET("/:id/events", h.GetEvents)
-			routes.PUT("/events/:eid", h.UpdateEvent)
-			routes.DELETE("/events/:eid", h.DeleteEvent)
+			routes.PUT("/events/:id", h.UpdateEvent)
+			routes.DELETE("/events/:id", h.DeleteEvent)
 		}
 		config := api.Group("/config")
 		{
@@ -79,6 +80,10 @@ func (h *Handlers) UploadGPX(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no file"})
 		return
 	}
+	if file.Size == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty file"})
+		return
+	}
 	name := c.PostForm("name")
 	if name == "" {
 		name = filepath.Base(file.Filename)
@@ -89,8 +94,8 @@ func (h *Handlers) UploadGPX(c *gin.Context) {
 		return
 	}
 	defer data.Close()
-	buf := make([]byte, file.Size)
-	if _, err := data.Read(buf); err != nil {
+	buf, err := io.ReadAll(data)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -194,13 +199,16 @@ func (h *Handlers) GetSegments(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	var segs []route.RouteSegment
-	h.DB.Where("route_id = ?", id).Order("start_distance ASC").Find(&segs)
-	c.JSON(http.StatusOK, segs)
+	var segments []route.RouteSegment
+	if err := h.DB.Where("route_id = ?", id).Order("start_distance ASC").Find(&segments).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, segments)
 }
 
 func (h *Handlers) UpdateSegment(c *gin.Context) {
-	sid, ok := parseInt(c.Param("sid"))
+	sid, ok := parseInt(c.Param("id"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -211,7 +219,6 @@ func (h *Handlers) UpdateSegment(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Type       string `json:"type"`
 		Commentary string `json:"commentary"`
 		Enabled    *bool  `json:"enabled"`
 	}
@@ -220,9 +227,6 @@ func (h *Handlers) UpdateSegment(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{}
-	if req.Type != "" {
-		updates["type"] = req.Type
-	}
 	if req.Commentary != "" {
 		updates["commentary"] = req.Commentary
 	}
@@ -234,7 +238,27 @@ func (h *Handlers) UpdateSegment(c *gin.Context) {
 }
 
 func (h *Handlers) RegenerateSegments(c *gin.Context) {
-	h.AnalyzeRoute(c)
+	id, ok := parseInt(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	points, err := h.RouteSvc.GetPoints(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	segments, err := h.Segmenter.Segment(points, "trail_running")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	h.DB.Where("route_id = ?", id).Delete(&route.RouteSegment{})
+	for i := range segments {
+		segments[i].RouteID = id
+		h.DB.Create(&segments[i])
+	}
+	c.JSON(http.StatusOK, segments)
 }
 
 func (h *Handlers) CreateEvent(c *gin.Context) {
@@ -243,32 +267,19 @@ func (h *Handlers) CreateEvent(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	var req struct {
-		Position     float64 `json:"position" binding:"required"`
-		EventType    string  `json:"event_type" binding:"required"`
-		Title        string  `json:"title"`
-		Description  string  `json:"description"`
-		Script       string  `json:"script"`
-		CameraPreset string  `json:"camera_preset"`
-		HoldBefore   float64 `json:"hold_before"`
-		HoldAfter    float64 `json:"hold_after"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var event route.StoryEvent
+	if err := c.ShouldBindJSON(&event); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	event := route.StoryEvent{
-		RouteID:      id,
-		Position:     req.Position,
-		EventType:    req.EventType,
-		Title:        req.Title,
-		Description:  req.Description,
-		Script:       req.Script,
-		CameraPreset: req.CameraPreset,
-		HoldBefore:   req.HoldBefore,
-		HoldAfter:    req.HoldAfter,
+	event.RouteID = id
+	if event.EventType == "" {
+		event.EventType = "COMMENTARY"
 	}
-	h.DB.Create(&event)
+	if err := h.DB.Create(&event).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusCreated, event)
 }
 
@@ -279,12 +290,15 @@ func (h *Handlers) GetEvents(c *gin.Context) {
 		return
 	}
 	var events []route.StoryEvent
-	h.DB.Where("route_id = ?", id).Order("position ASC").Find(&events)
+	if err := h.DB.Where("route_id = ?", id).Order("position ASC").Find(&events).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, events)
 }
 
 func (h *Handlers) UpdateEvent(c *gin.Context) {
-	eid, ok := parseInt(c.Param("eid"))
+	eid, ok := parseInt(c.Param("id"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -342,7 +356,7 @@ func (h *Handlers) UpdateEvent(c *gin.Context) {
 }
 
 func (h *Handlers) DeleteEvent(c *gin.Context) {
-	eid, ok := parseInt(c.Param("eid"))
+	eid, ok := parseInt(c.Param("id"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
