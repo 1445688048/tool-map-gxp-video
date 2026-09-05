@@ -3,6 +3,7 @@ package tile
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,11 +23,13 @@ type tileProvider struct {
 
 var providers = map[string]tileProvider{
 	"esri-satellite": {
-		url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{x}/{y}",
+		// ArcGIS 的路径语义是 tile/{level}/{row}/{col}，即 z/y/x；terrarium 是 z/x/y。
+		// 用显式参数序号统一为 Sprintf(url, z, x, y) 调用。
+		url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%[1]d/%[3]d/%[2]d",
 		header: map[string]string{"User-Agent": "gxp-map-video/1.0"},
 	},
 	"terrain": {
-		url: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+		url: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/%d/%d/%d.png",
 		header: map[string]string{"User-Agent": "gxp-map-video/1.0"},
 	},
 }
@@ -78,6 +81,7 @@ func (c *Cache) Get(provider string, z, x, y int) ([]byte, error) {
 	dir := filepath.Dir(cachePath)
 	os.MkdirAll(dir, 0755)
 	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+		log.Printf("cache tile %s: %v", cachePath, err)
 	}
 
 	return data, nil

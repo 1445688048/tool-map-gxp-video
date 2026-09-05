@@ -106,7 +106,7 @@ async function saveEvent(ev?: StoryEvent) {
       emit('eventChanged', updated)
       cancelEdit()
     } catch (e) {
-      showToast('保存失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
+      showToast('保存失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
     }
   } else {
     // Create new at current playback position or midpoint
@@ -119,7 +119,7 @@ async function saveEvent(ev?: StoryEvent) {
       emit('eventChanged', created)
       cancelEdit()
     } catch (e) {
-      showToast('创建失败: ' + (e instanceof Error ? e.message : String(e), 'error'))
+      showToast('创建失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
     }
   }
 }

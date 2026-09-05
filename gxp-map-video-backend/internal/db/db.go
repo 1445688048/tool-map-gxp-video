@@ -36,6 +36,7 @@ func New(path string) (*Database, error) {
 		&route.RouteSegment{},
 		&route.StoryEvent{},
 		&route.ExportTask{},
+		&route.RouteShowConfig{},
 	); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}

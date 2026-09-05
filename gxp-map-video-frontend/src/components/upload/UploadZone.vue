@@ -56,7 +56,7 @@ async function handleFile(file: File) {
     const route = await routeStore.uploadGPX(file)
     emit('loaded', route)
   } catch (err) {
-    showToast('上传失败: ' + (err instanceof Error ? err.message : String(err), 'error'))
+    showToast('上传失败: ' + (err instanceof Error ? err.message : String(err)), 'error')
   } finally {
     uploading.value = false
   }

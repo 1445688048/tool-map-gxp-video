@@ -14,8 +14,17 @@ type RawPoint struct {
 	Time          *time.Time
 }
 
+// Waypoint 是 GPX 中的航点（<wpt>），如补给点、观景台标记
+type Waypoint struct {
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lng  float64 `json:"lng"`
+	Ele  float64 `json:"ele"`
+}
+
 type ParseResult struct {
 	Points         []RawPoint
+	Waypoints      []Waypoint
 	TotalDistance  float64
 	TotalAscent    float64
 	TotalDescent   float64
@@ -25,8 +34,9 @@ type ParseResult struct {
 }
 
 type gpxDocument struct {
-	XMLName xml.Name `xml:"gpx"`
-	Tracks  []track  `xml:"trk"`
+	XMLName   xml.Name  `xml:"gpx"`
+	Tracks    []track   `xml:"trk"`
+	Waypoints []gpxWpt  `xml:"wpt"`
 }
 
 type track struct {
@@ -43,6 +53,13 @@ type xmlPoint struct {
 	Lon  float64 `xml:"lon,attr"`
 	Ele  float64 `xml:"ele"`
 	Time string  `xml:"time"`
+}
+
+type gpxWpt struct {
+	Lat  float64 `xml:"lat,attr"`
+	Lon  float64 `xml:"lon,attr"`
+	Ele  float64 `xml:"ele"`
+	Name string  `xml:"name"`
 }
 
 func Parse(data []byte) (*ParseResult, error) {
@@ -71,7 +88,13 @@ func Parse(data []byte) (*ParseResult, error) {
 		return nil, fmt.Errorf("GPX file contains no track points")
 	}
 
-	return computeStats(allPoints), nil
+	result := computeStats(allPoints)
+	var wpts []Waypoint
+	for _, w := range doc.Waypoints {
+		wpts = append(wpts, Waypoint{Name: w.Name, Lat: w.Lat, Lng: w.Lon, Ele: w.Ele})
+	}
+	result.Waypoints = wpts
+	return result, nil
 }
 
 func computeStats(points []RawPoint) *ParseResult {

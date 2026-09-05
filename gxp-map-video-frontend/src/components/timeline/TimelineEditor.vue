@@ -4,7 +4,13 @@
       <h3>故事时间线</h3>
       <span class="tl-total">{{ (totalDistance / 1000).toFixed(1) }} km</span>
     </div>
-    <div class="tl-track" @click="onTrackClick">
+    <div
+      class="tl-track"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointerleave="onPointerUp"
+    >
       <div class="tl-route-line"></div>
       <!-- Segment markers -->
       <div
@@ -94,11 +100,32 @@ function eventIcon(type: string) {
   return map[type] || '📌'
 }
 
-function onTrackClick(e: MouseEvent) {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const pct = ((e.clientX - rect.left) / rect.width) * 100
-  const dist = (pct / 100) * props.totalDistance
-  emit('seek', dist)
+let dragging = false
+
+function pointerToDist(clientX: number): number {
+  const track = document.querySelector('.tl-track') as HTMLElement | null
+  if (!track) return 0
+  const rect = track.getBoundingClientRect()
+  const pct = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100))
+  return (pct / 100) * props.totalDistance
+}
+
+function onPointerDown(e: PointerEvent) {
+  dragging = true
+  ;(e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId)
+  emit('seek', pointerToDist(e.clientX))
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (!dragging) return
+  emit('seek', pointerToDist(e.clientX))
+}
+
+function onPointerUp(e: PointerEvent) {
+  if (!dragging) return
+  dragging = false
+  ;(e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId)
+  emit('seek', pointerToDist(e.clientX))
 }
 
 const emit = defineEmits<{ seek: [distance: number] }>()
@@ -109,7 +136,7 @@ const emit = defineEmits<{ seek: [distance: number] }>()
 .tl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .tl-header h3 { font-size: 12px; color: #e94560; }
 .tl-total { font-size: 11px; color: #8899aa; }
-.tl-track { position: relative; height: 40px; background: #1a1a2e; border-radius: 4px; cursor: pointer; overflow: visible; }
+.tl-track { position: relative; height: 40px; background: #1a1a2e; border-radius: 4px; cursor: grab; overflow: visible; touch-action: none; user-select: none; }
 .tl-route-line { position: absolute; top: 50%; left: 0; right: 0; height: 2px; background: #2a3a5e; transform: translateY(-50%); }
 .tl-segment { position: absolute; top: 8px; bottom: 8px; border-radius: 2px; transition: opacity 0.15s; }
 .tl-segment:hover { opacity: 1 !important; }

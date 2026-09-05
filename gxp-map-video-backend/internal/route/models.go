@@ -94,3 +94,13 @@ type ExportTask struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+// RouteShowConfig 每条路线的演出配置（LLM 生成或手动保存）
+type RouteShowConfig struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	RouteID      uint      `gorm:"uniqueIndex;not null" json:"route_id"`
+	Status       string    `gorm:"size:16;not null;default:'NONE'" json:"status"` // NONE | GENERATING | READY | FAILED
+	Config       string    `gorm:"type:text" json:"config"`
+	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}

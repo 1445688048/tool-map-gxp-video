@@ -10,19 +10,23 @@
       </div>
       <div class="field-row">
         <span>起始俯角(°)</span>
-        <input v-model.number="introConfig.startPitch" type="number" min="10" max="60" class="num" />
+        <input v-model.number="introConfig.startPitch" type="number" min="5" max="85" class="num" />
       </div>
       <div class="field-row">
         <span>结束俯角(°)</span>
-        <input v-model.number="introConfig.endPitch" type="number" min="30" max="85" class="num" />
+        <input v-model.number="introConfig.endPitch" type="number" min="10" max="85" class="num" />
       </div>
       <div class="field-row">
         <span>起始高度(m)</span>
-        <input v-model.number="introConfig.startAltitude" type="number" min="200" max="5000" class="num" />
+        <input v-model.number="introConfig.startAltitude" type="number" min="200" max="15000" class="num" />
       </div>
       <div class="field-row">
         <span>结束高度(m)</span>
-        <input v-model.number="introConfig.endAltitude" type="number" min="30" max="500" class="num" />
+        <input v-model.number="introConfig.endAltitude" type="number" min="30" max="15000" class="num" />
+      </div>
+      <div class="field-row">
+        <span>螺旋角度(°)</span>
+        <input v-model.number="introConfig.spiralDeg" type="number" min="0" max="720" class="num" />
       </div>
     </div>
     <div class="section">
@@ -34,15 +38,19 @@
       </div>
       <div class="field-row">
         <span>起始俯角(°)</span>
-        <input v-model.number="outroConfig.startPitch" type="number" min="30" max="85" class="num" />
+        <input v-model.number="outroConfig.startPitch" type="number" min="10" max="85" class="num" />
       </div>
       <div class="field-row">
         <span>结束俯角(°)</span>
-        <input v-model.number="outroConfig.endPitch" type="number" min="10" max="50" class="num" />
+        <input v-model.number="outroConfig.endPitch" type="number" min="5" max="85" class="num" />
       </div>
       <div class="field-row">
         <span>结束高度(m)</span>
-        <input v-model.number="outroConfig.endAltitude" type="number" min="200" max="5000" class="num" />
+        <input v-model.number="outroConfig.endAltitude" type="number" min="200" max="15000" class="num" />
+      </div>
+      <div class="field-row">
+        <span>螺旋角度(°)</span>
+        <input v-model.number="outroConfig.spiralDeg" type="number" min="0" max="720" class="num" />
       </div>
     </div>
   </div>
@@ -53,19 +61,21 @@ import { ref } from 'vue'
 
 const introConfig = ref({
   enabled: true,
-  duration: 3,
-  startPitch: 30,
+  duration: 4,
+  startPitch: 20,
   endPitch: 60,
-  startAltitude: 1500,
-  endAltitude: 100,
+  startAltitude: 5000,
+  endAltitude: 1800,
+  spiralDeg: 270,
 })
 
 const outroConfig = ref({
   enabled: true,
-  duration: 4,
+  duration: 5,
   startPitch: 60,
   endPitch: 30,
-  endAltitude: 1500,
+  endAltitude: 5000,
+  spiralDeg: 270,
 })
 
 defineExpose({ introConfig, outroConfig })

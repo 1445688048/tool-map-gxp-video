@@ -89,6 +89,43 @@ export interface ExportTask {
   updated_at: string
 }
 
+export interface Waypoint {
+  name?: string
+  lat: number
+  lng: number
+  ele?: number
+}
+
+// LLM 生成的演出配置
+export interface ShowEvent {
+  atKm: number
+  type: string
+  title: string
+  script: string
+  voice: string
+  holdBefore: number
+  holdAfter: number
+  audioUrl?: string
+  audioSec?: number
+}
+
+export interface ShowConfig {
+  meta: { title: string; summary: string }
+  playback: { totalDurationSec: number; stepMode: string }
+  camera: {
+    altitude: number
+    pitch: number
+    lookAhead: number
+    deadzone: number
+    turnRate: number
+    curveSlow: { on: boolean; strength: number }
+    avoidAhead: boolean
+  }
+  intro: { enabled: boolean; duration: number; startAltitude: number; endAltitude: number; startPitch: number; endPitch: number; spiralDeg: number }
+  outro: { enabled: boolean; duration: number; endAltitude: number; endPitch: number; spiralDeg: number }
+  events: ShowEvent[]
+}
+
 export interface ActivityPreset {
   name: string
   flat_range: [number, number]

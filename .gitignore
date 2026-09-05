@@ -18,3 +18,8 @@ Thumbs.db
 *.swp
 *.swo
 refer/
+
+# 第三方参考源码与本地工具目录
+edge-tts-go-main/
+.serena/
+gxp-map-video-backend/data/llm-api-key.txt
