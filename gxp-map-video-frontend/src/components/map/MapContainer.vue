@@ -37,10 +37,11 @@ onBeforeUnmount(() => {
 defineExpose({
   getMap: () => mapEngine.value?.map ?? null,
   loadRoute: (pts: TrackPoint[]) => mapEngine.value?.loadRoute(pts),
+  updateRouteProgress: (frac: number) => mapEngine.value?.updateRouteProgress(frac),
   setProgressPoint: (p: TrackPoint, bearing?: number) => mapEngine.value?.setProgressPoint(p, bearing),
   removeProgressMarker: () => mapEngine.value?.removeProgressMarker(),
   setProgressMarkerImage: (url: string | null) => mapEngine.value?.setProgressMarkerImage(url),
-  setProgressMarkerSprite: (url: string, opts?: { row?: number; cols?: number; frames?: number; fps?: number; size?: number }) => mapEngine.value?.setProgressMarkerSprite(url, opts),
+  setProgressMarkerSprite: (url: string, opts?: { row?: number; rows?: number; cols?: number; fps?: number; size?: number }) => mapEngine.value?.setProgressMarkerSprite(url, opts),
   setWaypoints: (wpts: Waypoint[]) => mapEngine.value?.setWaypoints(wpts),
 })
 </script>

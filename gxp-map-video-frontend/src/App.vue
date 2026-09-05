@@ -371,6 +371,7 @@ const mapContainerRef = ref<{
   getMap: () => any
   loadRoute: (pts: any[]) => void
   setProgressPoint: (p: any, bearing?: number) => void
+  updateRouteProgress: (frac: number) => void
   removeProgressMarker: () => void
   setProgressMarkerImage: (url: string | null) => void
   setProgressMarkerSprite: (url: string, opts?: { row?: number; rows?: number; cols?: number; frames?: number; fps?: number; size?: number }) => void
@@ -452,9 +453,10 @@ watch(() => routeStore.trackPoints, (pts) => {
       }
     })
     // 每帧同步进度点与 HUD（插值位置），镜头同步在播放器内部完成
-    routePlayer.value.onProgress((pt, _progress, bearing) => {
+    routePlayer.value.onProgress((pt, progress, bearing) => {
       playbackStore.setCurrentPoint(pt)
       mapContainerRef.value?.setProgressPoint(pt, bearing)
+      mapContainerRef.value?.updateRouteProgress(progress)
     })
     // Attach the maplibre map (created inside MapContainer) so camera drives the map
     cam.setMap(mapContainerRef.value?.getMap?.() ?? null)
@@ -587,6 +589,7 @@ watch([cameraAlt, cameraPitch], ([alt, pitch]) => {
 function syncMapProgress() {
   const pt = routePlayer.value?.currentPoint ?? null
   playbackStore.setCurrentPoint(pt)
+  if (routePlayer.value) mapContainerRef.value?.updateRouteProgress(routePlayer.value.progress)
   if (pt && mapContainerRef.value) {
     mapContainerRef.value.setProgressPoint(pt)
   } else if (mapContainerRef.value) {

@@ -2,23 +2,6 @@ import maplibregl, { LngLatBounds } from 'maplibre-gl'
 import type { TrackPoint, Waypoint } from '@/types/gpx'
 import '@/engines/map-engine/style.css'
 
-// 坡度配色（与分段分析图例一致）
-function slopeColor(slope: number): string {
-  if (slope >= 8) return '#e94560'
-  if (slope >= 3) return '#f0a500'
-  if (slope <= -8) return '#ff6b6b'
-  if (slope <= -3) return '#533483'
-  return '#4ecca3'
-}
-
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLng = (lng2 - lng1) * Math.PI / 180
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
 function pointFeature(lng: number, lat: number, props: Record<string, unknown> = {}) {
   return { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [lng, lat] }, properties: props }
 }
@@ -30,7 +13,8 @@ function emptyFeatureCollection() {
 export class MapEngine {
   map: maplibregl.Map | null = null
   private trackSourceId = 'gpx-track-source'
-  private trackLayerId = 'gpx-track'
+  private trackLayerId = 'gpx-track'          // 淡色预览层：整条路线
+  private revealLayerId = 'gpx-track-progress' // 亮色揭示层：已完成的进度
   // 进度标记：贴地 symbol 图层（DOM 标记不感知 3D 地形）
   private markerSourceId = 'progress-marker-source'
   private markerLayerId = 'progress-marker'
@@ -132,60 +116,58 @@ export class MapEngine {
     this.runWhenStyleReady(() => this.addRouteLayers(points))
   }
 
-  private addRouteLayers(points: TrackPoint[]) {
-    if (!this.map) return
-    if (this.map.getLayer(this.trackLayerId)) this.map.removeLayer(this.trackLayerId)
-    if (this.map.getSource(this.trackSourceId)) this.map.removeSource(this.trackSourceId)
-
-    const coords: [number, number, number][] = points.map(p => [p.longitude, p.latitude, p.elevation])
-    // lineMetrics 开启后支持 line-gradient（按坡度染色）
-    this.map.addSource(this.trackSourceId, {
-      type: 'geojson' as const,
-      data: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} },
-      lineMetrics: true,
-    } as any)
-    this.map.addLayer({
-      id: this.trackLayerId, type: 'line' as const, source: this.trackSourceId,
-      layout: { 'line-join': 'round' as const, 'line-cap': 'round' as const },
-      paint: { 'line-width': 5, 'line-gradient': this.buildSlopeGradient(points) },
-    } as any)
-
-    this.addEndpointsFlags(points)
-
-    const bounds = new LngLatBounds()
-    for (const p of points) bounds.extend([p.longitude, p.latitude])
-    this.map.fitBounds(bounds, { padding: 80, duration: 0 })
-
-    // 轨迹线重建后会盖住标记层，把标记挪回顶层
-    if (this.map.getLayer(this.markerLayerId)) this.map.moveLayer(this.markerLayerId)
+  // 进度揭示层：跑到哪，亮线就画到哪（frac = 0~1 已完成比例）
+  updateRouteProgress(frac: number) {
+    if (!this.map || !this.map.getLayer(this.revealLayerId)) return
+    const f = Math.max(0, Math.min(1, frac))
+    const color = '#ff5a5f'
+    const edge = Math.min(1, f + 0.004)
+    this.map.setPaintProperty(this.revealLayerId, 'line-gradient',
+      ['interpolate', ['linear'], ['line-progress'], 0, color, f, color, edge, 'rgba(0,0,0,0)', 1, 'rgba(0,0,0,0)'])
   }
 
-  // 按坡度给轨迹染色：沿里程生成 line-gradient 断点（必须严格递增）
-  private buildSlopeGradient(points: TrackPoint[]) {
-    const dists: number[] = [0]
-    let acc = 0
-    for (let i = 1; i < points.length; i++) {
-      acc += haversineM(points[i - 1].latitude, points[i - 1].longitude, points[i].latitude, points[i].longitude)
-      dists.push(acc)
+  private addRouteLayers(points: TrackPoint[]) {
+    if (!this.map) return
+    try {
+      if (this.map.getLayer(this.trackLayerId)) this.map.removeLayer(this.trackLayerId)
+      if (this.map.getLayer(this.revealLayerId)) this.map.removeLayer(this.revealLayerId)
+      if (this.map.getSource(this.trackSourceId)) this.map.removeSource(this.trackSourceId)
+
+      const coords: [number, number, number][] = points.map(p => [p.longitude, p.latitude, p.elevation])
+      // lineMetrics 开启后支持 line-gradient（进度揭示层的动态边界）
+      this.map.addSource(this.trackSourceId, {
+        type: 'geojson' as const,
+        data: { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} },
+        lineMetrics: true,
+      } as any)
+      // 预览层：整条路线淡色，让用户看到"将要走的路"
+      this.map.addLayer({
+        id: this.trackLayerId, type: 'line' as const, source: this.trackSourceId,
+        layout: { 'line-join': 'round' as const, 'line-cap': 'round' as const },
+        paint: { 'line-color': 'rgba(255, 255, 255, 0.35)', 'line-width': 4 },
+      })
+      // 进度揭示层：亮红色，随进度从起点生长
+      this.map.addLayer({
+        id: this.revealLayerId, type: 'line' as const, source: this.trackSourceId,
+        layout: { 'line-join': 'round' as const, 'line-cap': 'round' as const },
+        paint: {
+          'line-color': '#ff5a5f',
+          'line-width': 6,
+          'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, 'rgba(0,0,0,0)', 0, 'rgba(0,0,0,0)', 0.0001, '#ff5a5f', 1, '#ff5a5f'],
+        },
+      } as any)
+
+      this.addEndpointsFlags(points)
+
+      const bounds = new LngLatBounds()
+      for (const p of points) bounds.extend([p.longitude, p.latitude])
+      this.map.fitBounds(bounds, { padding: 80, duration: 0 })
+
+      // 轨迹线重建后会盖住标记层，把标记挪回顶层
+      if (this.map.getLayer(this.markerLayerId)) this.map.moveLayer(this.markerLayerId)
+    } catch (e) {
+      console.error('[MapEngine] addRouteLayers 失败:', e)
     }
-    const stops: unknown[] = ['interpolate', ['linear'], ['line-progress']]
-    const step = Math.max(1, Math.ceil(points.length / 120))
-    let lastFrac = -1
-    for (let i = 0; i < points.length; i += step) {
-      const frac = acc > 0 ? dists[i] / acc : 0
-      if (frac <= lastFrac) continue
-      stops.push(frac, slopeColor(points[i].slope))
-      lastFrac = frac
-    }
-    const finalFrac = acc > 0 ? 1 : 0
-    if (finalFrac > lastFrac) {
-      stops.push(finalFrac, slopeColor(points[points.length - 1].slope))
-      lastFrac = finalFrac
-    }
-    // 至少需要两个断点
-    if (lastFrac < 0) stops.push(0, slopeColor(points[0].slope))
-    if (stops.length <= 3) stops.push(1, slopeColor(points[points.length - 1].slope))
-    return stops
   }
 
   // 起终点旗标
