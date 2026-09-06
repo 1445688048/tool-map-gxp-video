@@ -193,15 +193,29 @@
       </div>
     </Teleport>
 
-    <!-- AI 编排弹窗：比赛名称与组别必填（用于完赛收尾解说） -->
+    <!-- AI 编排弹窗：比赛名称/组别/音色/时长 必填或选择，决定成片规则 -->
     <Teleport to="body">
       <div v-if="showArrangeDialog" class="arrange-dialog-mask" @click.self="showArrangeDialog = false">
         <div class="arrange-dialog">
           <h3>AI 编排演出</h3>
-          <p class="arrange-tip">AI 将分析路线地形，自动设置镜头参数、生成赛前探路解说与时间轴。</p>
+          <p class="arrange-tip">AI 将分析路线地形，按以下规则生成镜头参数、赛前探路解说与时间轴。导出视频将忠实执行这份编排。</p>
           <label>比赛名称 *<input v-model="arrangeRaceName" placeholder="如：北京100越野赛" /></label>
           <label>组别 *<input v-model="arrangeCategory" placeholder="如：100公里组" /></label>
-          <p class="arrange-tip">比赛名称与组别将用于片尾完赛收尾语。</p>
+          <label>解说音色 *
+            <select v-model="arrangeVoice" class="export-select">
+              <option value="zh-CN-XiaoxiaoNeural">晓晓（女·自然）</option>
+              <option value="zh-CN-YunxiNeural">云希（男）</option>
+              <option value="zh-CN-YunyangNeural">云扬（男·播音）</option>
+              <option value="zh-CN-XiaoyiNeural">晓伊（女·活泼）</option>
+            </select>
+          </label>
+          <label>视频时长 *
+            <select v-model.number="arrangeDurationSec" class="export-select">
+              <option :value="150">2.5 分钟</option>
+              <option :value="300">5 分钟</option>
+              <option :value="600">10 分钟</option>
+            </select>
+          </label>
           <div class="arrange-actions">
             <button class="btn-cancel" @click="showArrangeDialog = false">取消</button>
             <button
@@ -216,27 +230,16 @@
       </div>
     </Teleport>
 
-    <!-- 视频导出弹窗 -->
+    <!-- 视频导出弹窗：忠实执行编排配置，不在此改创作参数 -->
     <Teleport to="body">
       <div v-if="showExportDialog" class="arrange-dialog-mask" @click.self="showExportDialog = false">
         <div class="arrange-dialog">
           <h3>导出解说视频 (MP4)</h3>
-          <label>解说音色
-            <select v-model="exportVoice" class="export-select">
-              <option value="zh-CN-XiaoxiaoNeural">晓晓（女·自然）</option>
-              <option value="zh-CN-YunxiNeural">云希（男）</option>
-              <option value="zh-CN-YunyangNeural">云扬（男·播音）</option>
-              <option value="zh-CN-XiaoyiNeural">晓伊（女·活泼）</option>
-            </select>
-          </label>
-          <label>视频时长
-            <select v-model.number="exportDurationSec" class="export-select">
-              <option :value="150">2.5 分钟</option>
-              <option :value="300">5 分钟</option>
-              <option :value="600">10 分钟</option>
-            </select>
-          </label>
-          <p class="arrange-tip">录制预演画面 + 解说语音混流，后端转码为 MP4。录制期间请不要切换窗口或最小化。</p>
+          <p class="arrange-tip">
+            将按 AI 编排配置执行：时长 {{ routeDurationMin }} 分钟 · 解说音色 {{ currentVoiceLabel }} ·
+            {{ timelineEvents.length }} 个解说事件。录制预演画面与语音混流，后端转码 MP4。
+          </p>
+          <p class="arrange-tip">录制期间请不要切换窗口或最小化。</p>
           <div class="arrange-actions">
             <button class="btn-cancel" @click="showExportDialog = false">取消</button>
             <button class="btn-confirm" :disabled="exporting" @click="startExport">
@@ -637,6 +640,8 @@ const arranging = ref(false)
 const showArrangeDialog = ref(false)
 const arrangeRaceName = ref('')
 const arrangeCategory = ref('')
+const arrangeVoice = ref('zh-CN-XiaoxiaoNeural')
+const arrangeDurationSec = ref(600)
 const timelineEvents = ref<ShowEvent[]>([])
 let tEventIdx = 0
 let tEventBusy = false
@@ -698,11 +703,13 @@ async function onArrange() {
   }
   arranging.value = true
   showArrangeDialog.value = false
-  showToast('AI 正在生成演出配置（事件较多，最长可能需要几分钟，可随时关窗等待）…', 'info')
+  // 编排确定时长与音色，同步到当前播放设置
+  routeDurationMin.value = Math.max(1, Math.round((arrangeDurationSec.value / 60) * 2) / 2)
   try {
     // 异步任务：后端立即返回 GENERATING，前端轮询直到 READY/FAILED
     await api.arrangeWithAI(currentRouteId.value, {
-      durationSec: Math.max(60, Math.round((routeDurationMin.value || 10) * 60)),
+      durationSec: arrangeDurationSec.value,
+      voice: arrangeVoice.value,
       raceName: arrangeRaceName.value.trim(),
       category: arrangeCategory.value.trim(),
     })
@@ -717,8 +724,10 @@ async function onArrange() {
     }
     if (!cfg) throw new Error('生成超时，请稍后重试')
     applyConfig(cfg)
-    showToast(`AI 编排完成：${cfg.meta?.title ?? ''}（${cfg.events?.length ?? 0} 个解说事件）`, 'success')
+    // 以编排的音色合成语音（事件各自的 voice 已由 AI 按规则指定）
+    lastSynthKey = ''
     void synthesizeTimeline()
+    showToast(`AI 编排完成：${cfg.meta?.title ?? ''}（${cfg.events?.length ?? 0} 个解说事件）`, 'success')
   } catch (e) {
     showToast('AI 编排失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
   } finally {
@@ -758,9 +767,10 @@ async function startExport() {
   try {
     ensureAudioGraph()
     exportMode = true
-    // 1. 以选定音色合成全部解说语音
-    exportStatus.value = '合成解说语音…'
-    await synthesizeTimeline(exportVoice.value)
+    // 1. 语音以编排为准：未合成的补齐（已合成直接跳过）
+    exportStatus.value = '检查解说语音…'
+    lastSynthKey = ''
+    await synthesizeTimeline()
     // 2. 创建导出任务
     const task = await api.createExportTask(currentRouteId.value)
     const tid = task.id
@@ -805,9 +815,9 @@ async function startExport() {
   }
 }
 
-async function synthesizeTimeline(voiceOverride?: string) {
+async function synthesizeTimeline() {
   if (synthRunning || !currentRouteId.value) return
-  const key = `${voiceOverride ?? 'auto'}|` + timelineEvents.value.map(e => e.script.slice(0, 10)).join(',')
+  const key = timelineEvents.value.map(e => `${e.voice}|${e.script.slice(0, 10)}`).join(',')
   if (key === lastSynthKey) return
   synthRunning = true
   lastSynthKey = key
@@ -817,7 +827,7 @@ async function synthesizeTimeline(voiceOverride?: string) {
     try {
       const r = await api.synthesizeEventTTS(currentRouteId.value, {
         text: ev.script,
-        voice: voiceOverride || ev.voice || 'zh-CN-XiaoxiaoNeural',
+        voice: ev.voice || 'zh-CN-XiaoxiaoNeural',
       })
       ev.audioUrl = r.url
       ev.audioSec = r.durationSec
@@ -878,17 +888,24 @@ function rearmTimeline(dist: number) {
   if (tEventIdx < 0) tEventIdx = timelineEvents.value.length
 }
 
-// ── 视频导出：录制地图画面 + 解说语音混流 → WebM → 后端 ffmpeg 转 MP4 ──
+// ── 视频导出：忠实执行编排配置（音色/时长以编排为准，导出不改创作参数）──
 const routeList = ref<Route[]>([])
 const showExportDialog = ref(false)
 const exporting = ref(false)
 const exportStatus = ref('')
-const exportVoice = ref('zh-CN-XiaoxiaoNeural')
-const exportDurationSec = ref(150)
 let audioCtx: AudioContext | null = null
 let audioDest: MediaStreamAudioDestinationNode | null = null
 let exportMode = false
 let lastSynthKey = ''
+
+const currentVoiceLabel = computed(() => {
+  const names: Record<string, string> = {
+    'zh-CN-XiaoxiaoNeural': '晓晓', 'zh-CN-YunxiNeural': '云希',
+    'zh-CN-YunyangNeural': '云扬', 'zh-CN-XiaoyiNeural': '晓伊',
+  }
+  const v = timelineEvents.value.find(e => e.voice)?.voice ?? ''
+  return names[v] ?? '晓晓'
+})
 
 function ensureAudioGraph() {
   if (!audioCtx) {
