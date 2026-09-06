@@ -33,10 +33,16 @@ type ParseResult struct {
 	Duration       *float64
 }
 
+type gpxRoute struct {
+	Name     string     `xml:"name"`
+	Points   []xmlPoint `xml:"rtept"`
+}
+
 type gpxDocument struct {
-	XMLName   xml.Name  `xml:"gpx"`
-	Tracks    []track   `xml:"trk"`
-	Waypoints []gpxWpt  `xml:"wpt"`
+	XMLName   xml.Name   `xml:"gpx"`
+	Tracks    []track    `xml:"trk"`
+	Routes    []gpxRoute `xml:"rte"`
+	Waypoints []gpxWpt   `xml:"wpt"`
 }
 
 type track struct {
@@ -80,6 +86,14 @@ func Parse(data []byte) (*ParseResult, error) {
 					}
 				}
 				allPoints = append(allPoints, p)
+			}
+		}
+	}
+	// 无轨迹时回退到 <rte> 路线点（规划路径，同为有序经纬度序列）
+	if len(allPoints) == 0 {
+		for _, rte := range doc.Routes {
+			for _, xp := range rte.Points {
+				allPoints = append(allPoints, RawPoint{Lat: xp.Lat, Lng: xp.Lon, Ele: xp.Ele})
 			}
 		}
 	}
