@@ -563,7 +563,10 @@ func (h *Handlers) UploadWebM(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	go h.ExportSvc.RunExportWithWebM(tid, dest)
+	// 目标分辨率（录制舞台尺寸），转码时归一化
+	w := strings.TrimSpace(c.PostForm("width"))
+	ht := strings.TrimSpace(c.PostForm("height"))
+	go h.ExportSvc.RunExportWithWebM(tid, dest, w, ht)
 	c.JSON(http.StatusCreated, gin.H{"message": "webm uploaded, export started"})
 }
 

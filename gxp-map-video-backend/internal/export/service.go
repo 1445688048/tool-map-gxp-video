@@ -147,7 +147,7 @@ func (s *Service) CreateTask(routeID uint) (*route.ExportTask, error) {
 }
 
 // runExportInternal is the shared export logic used by both RunExport and RunExportWithWebM.
-func (s *Service) runExportInternal(taskID uint, inputSource string) error {
+func (s *Service) runExportInternal(taskID uint, inputSource, outW, outH string) error {
 	var task route.ExportTask
 	if err := s.db.First(&task, taskID).Error; err != nil {
 		return err
@@ -226,6 +226,9 @@ func (s *Service) runExportInternal(taskID uint, inputSource string) error {
 	} else {
 		args = []string{"-y", "-i", inputSource}
 	}
+	if outW != "" && outH != "" {
+		args = append(args, "-vf", fmt.Sprintf("scale=%s:%s", outW, outH))
+	}
 	args = append(args, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", outputPath)
 
 	cmd := exec.Command("ffmpeg", args...)
@@ -243,9 +246,9 @@ func (s *Service) runExportInternal(taskID uint, inputSource string) error {
 }
 
 func (s *Service) RunExport(taskID uint) error {
-	return s.runExportInternal(taskID, "")
+	return s.runExportInternal(taskID, "", "", "")
 }
 
-func (s *Service) RunExportWithWebM(taskID uint, webmPath string) error {
-	return s.runExportInternal(taskID, webmPath)
+func (s *Service) RunExportWithWebM(taskID uint, webmPath, outW, outH string) error {
+	return s.runExportInternal(taskID, webmPath, outW, outH)
 }

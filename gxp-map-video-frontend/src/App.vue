@@ -1,5 +1,5 @@
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'exporting-stage': !!exportStage }">
     <header class="toolbar">
       <h1>GPX 越野路线 AI 预演</h1>
       <div class="toolbar-right">
@@ -14,7 +14,7 @@
       </div>
     </header>
 
-    <main class="main">
+    <main class="main" :style="exportStage ? { width: exportStage.w + 'px', height: exportStage.h + 'px' } : undefined">
       <!-- Left panel: Segments -->
       <div v-if="showSegments" class="left-panel">
         <SegmentList :route-id="currentRouteId" :active-segment-id="activeSegment?.id ?? null" @segment-updated="onSegmentUpdated" @segments-changed="onSegmentsChanged" />
@@ -230,16 +230,29 @@
       </div>
     </Teleport>
 
-    <!-- 视频导出弹窗：忠实执行编排配置，不在此改创作参数 -->
+    <!-- 视频导出弹窗：技术参数（分辨率/宽高比），创作参数以 AI 编排为准 -->
     <Teleport to="body">
       <div v-if="showExportDialog" class="arrange-dialog-mask" @click.self="showExportDialog = false">
         <div class="arrange-dialog">
           <h3>导出解说视频 (MP4)</h3>
           <p class="arrange-tip">
-            将按 AI 编排配置执行：时长 {{ routeDurationMin }} 分钟 · 解说音色 {{ currentVoiceLabel }} ·
-            {{ timelineEvents.length }} 个解说事件。录制预演画面与语音混流，后端转码 MP4。
+            按 AI 编排配置执行：时长 {{ routeDurationMin }} 分钟 · 解说音色 {{ currentVoiceLabel }} ·
+            {{ timelineEvents.length }} 个解说事件。
           </p>
-          <p class="arrange-tip">录制期间请不要切换窗口或最小化。</p>
+          <label>分辨率
+            <select v-model="exportResolution" class="export-select">
+              <option value="720p">720p 高清</option>
+              <option value="1080p">1080p 全高清</option>
+            </select>
+          </label>
+          <label>画面比例
+            <select v-model="exportAspect" class="export-select">
+              <option value="16:9">16:9 横屏（B站/西瓜）</option>
+              <option value="9:16">9:16 竖屏（抖音/快手）</option>
+              <option value="1:1">1:1 方形</option>
+            </select>
+          </label>
+          <p class="arrange-tip">输出 {{ stageDims.w }}×{{ stageDims.h }}。录制 = 预演画面 + 解说语音混流，后端转码 MP4。录制期间请不要切换窗口或最小化。</p>
           <div class="arrange-actions">
             <button class="btn-cancel" @click="showExportDialog = false">取消</button>
             <button class="btn-confirm" :disabled="exporting" @click="startExport">
@@ -254,7 +267,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import MapContainer from './components/map/MapContainer.vue'
 import UploadZone from './components/upload/UploadZone.vue'
 import SegmentList from './components/segment/SegmentList.vue'
@@ -771,31 +784,42 @@ async function startExport() {
     exportStatus.value = '检查解说语音…'
     lastSynthKey = ''
     await synthesizeTimeline()
-    // 2. 创建导出任务
+    // 2. 切入导出舞台：隐藏编辑 UI，地图按所选分辨率/比例精确铺满
+    exportStage.value = stageDims.value
+    await nextTick()
+    mapContainerRef.value?.getMap()?.resize()
+    await sleep(600)
+    // 3. 创建导出任务
     const task = await api.createExportTask(currentRouteId.value)
     const tid = task.id
-    // 3. 重置到起点并武装时间轴
+    // 4. 重置到起点并武装时间轴
     stop()
     rearmTimeline(0)
-    // 4. 开始录制（含开场动画）
+    // 5. 开始录制（含开场动画）
     exportStatus.value = '录制中…'
     const recording = startRecording()
     togglePlay() // 从起点触发 Intro + 播放
-    // 5. 等待播放 + Outro 结束
+    // 6. 等待播放 + Outro 结束
     await new Promise<void>(resolve => {
       const t = setInterval(() => {
         if (!exporting.value || playbackStore.phase === 'ended') { clearInterval(t); resolve() }
       }, 500)
     })
-    // 6. 停止录制并上传
+    // 7. 停止录制并上传（带目标分辨率，后端转码时归一化）
     exportStatus.value = '录制完成，上传中…'
     const blob = await recording.stop()
     exportMode = false
     timelineAudio?.pause()
     const form = new FormData()
     form.append('video', blob, `route${currentRouteId.value}_${tid}.webm`)
+    form.append('width', String(exportStage.value?.w ?? ''))
+    form.append('height', String(exportStage.value?.h ?? ''))
     await fetch(`/api/export/upload/${tid}`, { method: 'POST', body: form })
-    // 7. 轮询后端转码状态
+    // 恢复正常布局
+    exportStage.value = null
+    await nextTick()
+    mapContainerRef.value?.getMap()?.resize()
+    // 8. 轮询后端转码状态
     exportStatus.value = '后端转码 MP4 中…'
     let out = ''
     for (let i = 0; i < 80; i++) {
@@ -888,15 +912,27 @@ function rearmTimeline(dist: number) {
   if (tEventIdx < 0) tEventIdx = timelineEvents.value.length
 }
 
-// ── 视频导出：忠实执行编排配置（音色/时长以编排为准，导出不改创作参数）──
+// ── 视频导出：忠实执行编排配置（音色/时长以编排为准，导出只设技术参数）──
 const routeList = ref<Route[]>([])
 const showExportDialog = ref(false)
 const exporting = ref(false)
 const exportStatus = ref('')
+const exportResolution = ref<'720p' | '1080p'>('720p')
+const exportAspect = ref<'16:9' | '9:16' | '1:1'>('16:9')
+const exportStage = ref<{ w: number; h: number } | null>(null)
 let audioCtx: AudioContext | null = null
 let audioDest: MediaStreamAudioDestinationNode | null = null
 let exportMode = false
 let lastSynthKey = ''
+
+// 舞台尺寸：按分辨率与宽高比计算（偶数像素，编码友好）
+const stageDims = computed(() => {
+  const base = exportResolution.value === '1080p' ? 1080 : 720
+  const even = (v: number) => Math.round(v / 2) * 2
+  if (exportAspect.value === '16:9') return { w: even(base * 16 / 9), h: base }
+  if (exportAspect.value === '9:16') return { w: even(base * 9 / 16), h: base }
+  return { w: base, h: base }
+})
 
 const currentVoiceLabel = computed(() => {
   const names: Record<string, string> = {
@@ -982,6 +1018,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .arrange-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #8899aa; margin-bottom: 10px; }
 .arrange-dialog input { background: #0f3460; color: #eee; border: 1px solid #2a3a5e; border-radius: 5px; padding: 7px 10px; font-size: 13px; outline: none; }
 .arrange-dialog input:focus { border-color: #e94560; }
+.exporting-stage .toolbar, .exporting-stage .left-panel, .exporting-stage .right-panel,
+.exporting-stage footer.controls, .exporting-stage .timeline-editor, .exporting-stage .upload-overlay {
+  display: none !important;
+}
+.exporting-stage .main {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  background: #000;
+  overflow: hidden;
+}
 .arrange-tip { font-size: 11px; color: #667; margin-bottom: 10px; line-height: 1.5; }
 .export-select { background: #0f3460; color: #eee; border: 1px solid #2a3a5e; border-radius: 5px; padding: 7px 10px; font-size: 13px; outline: none; width: 100%; }
 .arrange-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
