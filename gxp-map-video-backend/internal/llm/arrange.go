@@ -456,3 +456,63 @@ func BuildPayload(r *route.Route, points []route.TrackPoint, segments []route.Ro
 		"hints":            hints,
 	}
 }
+
+// WaypointAt 途经点及其在路线上的里程位置
+type WaypointAt struct {
+	Name string
+	AtKm float64
+	Ele  float64
+}
+
+// WaypointsAtKm 计算每个航点在轨迹上的最近里程位置
+func WaypointsAtKm(waypoints []gpx.Waypoint, points []route.TrackPoint) []WaypointAt {
+	out := []WaypointAt{}
+	for _, w := range waypoints {
+		best := math.MaxFloat64
+		var atKm, ele float64
+		for _, p := range points {
+			dLat := (p.Latitude - w.Lat) * 111320
+			dLng := (p.Longitude - w.Lng) * 111320 * math.Cos(w.Lat*math.Pi/180)
+			d := math.Sqrt(dLat*dLat + dLng*dLng)
+			if d < best {
+				best = d
+				atKm = p.Distance / 1000
+				ele = p.Elevation
+			}
+		}
+		out = append(out, WaypointAt{Name: w.Name, AtKm: math.Round(atKm*100) / 100, Ele: math.Round(ele*10) / 10})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].AtKm < out[j].AtKm })
+	return out
+}
+
+// EnsureWaypointEvents 保证每个途经点都有事件（LLM 遗漏时用真实数据补齐）。
+// 返回是否发生了修改。
+func EnsureWaypointEvents(cfg *ShowConfig, wps []WaypointAt) bool {
+	changed := false
+	for _, wp := range wps {
+		covered := false
+		for _, e := range cfg.Events {
+			if math.Abs(e.AtKm-wp.AtKm) < 0.6 {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		ele := ""
+		if wp.Ele > 0 {
+			ele = fmt.Sprintf("当前海拔 %.0f 米。", wp.Ele)
+		}
+		script := truncate(fmt.Sprintf("到达%s，已完成 %.1f 公里。%s接下来按路线继续前进，注意节奏与体力分配。", wp.Name, wp.AtKm, ele), 160)
+		cfg.Events = append(cfg.Events, ShowEvent{
+			AtKm: wp.AtKm, Type: "POI", Title: truncate(wp.Name, 20),
+			Script: script, Voice: "zh-CN-XiaoxiaoNeural",
+			HoldBefore: 0.5, HoldAfter: 0,
+		})
+		changed = true
+	}
+	sort.Slice(cfg.Events, func(i, j int) bool { return cfg.Events[i].AtKm < cfg.Events[j].AtKm })
+	return changed
+}

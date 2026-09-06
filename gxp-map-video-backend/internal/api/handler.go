@@ -721,12 +721,19 @@ func (h *Handlers) generateShowConfig(routeID uint, durationSec int, style, voic
 	if err == nil {
 		var cfg *llm.ShowConfig
 		cfg, err = llm.ParseAndClamp(content, totalKm)
+		if err == nil {
+			// 保证每个途经点都有事件（LLM 遗漏时用真实数据补齐）
+			llm.EnsureWaypointEvents(cfg, llm.WaypointsAtKm(parsed.Waypoints, points))
+		}
 		if err != nil {
 			// 带错误说明重试一次
 			retry := string(userJSON) + "\n\n上次输出存在以下问题，请修正后重新输出完整 JSON：" + err.Error()
 			content, err = client.Chat(system, retry)
 			if err == nil {
 				cfg, err = llm.ParseAndClamp(content, totalKm)
+				if err == nil {
+					llm.EnsureWaypointEvents(cfg, llm.WaypointsAtKm(parsed.Waypoints, points))
+				}
 			}
 		}
 		if err == nil {

@@ -4,7 +4,7 @@
       <h1>GPX 越野路线 AI 预演</h1>
       <div class="toolbar-right">
         <select v-if="routeList.length" class="preset-select" :value="currentRouteId ?? ''" @change="onSelectRoute" title="切换路线">
-          <option v-for="r in routeList" :key="r.id" :value="r.id">{{ r.name }}</option>
+          <option v-for="r in routeList" :key="r.id" :value="r.id">{{ routeLabel(r.id, r.name, r.total_distance) }}</option>
         </select>
         <button @click="showArrangeDialog = true" :disabled="!currentRouteId || arranging" class="btn-arrange">
           {{ arranging ? 'AI 编排中…' : 'AI 编排' }}
@@ -740,6 +740,7 @@ async function onArrange() {
     // 以编排的音色合成语音（事件各自的 voice 已由 AI 按规则指定）
     lastSynthKey = ''
     void synthesizeTimeline()
+    void refreshRouteList()
     showToast(`AI 编排完成：${cfg.meta?.title ?? ''}（${cfg.events?.length ?? 0} 个解说事件）`, 'success')
   } catch (e) {
     showToast('AI 编排失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
@@ -914,6 +915,7 @@ function rearmTimeline(dist: number) {
 
 // ── 视频导出：忠实执行编排配置（音色/时长以编排为准，导出只设技术参数）──
 const routeList = ref<Route[]>([])
+const routeMeta = ref<Record<number, { status: string; events: number }>>({})
 const showExportDialog = ref(false)
 const exporting = ref(false)
 const exportStatus = ref('')
@@ -952,7 +954,32 @@ function ensureAudioGraph() {
 }
 
 async function refreshRouteList() {
-  try { routeList.value = await api.listRoutes() } catch { /* 后端不可用 */ }
+  try {
+    routeList.value = await api.listRoutes()
+    // 并行取每条路线的编排状态（下拉框展示"未编排/已编排"）
+    const metas: Record<number, { status: string; events: number }> = {}
+    await Promise.all(routeList.value.map(async r => {
+      try {
+        const resp = await api.getShowConfig(r.id)
+        metas[r.id] = { status: resp.status, events: resp.config?.events?.length ?? 0 }
+      } catch {
+        metas[r.id] = { status: 'NONE', events: 0 }
+      }
+    }))
+    routeMeta.value = metas
+  } catch { /* 后端不可用 */ }
+}
+
+function routeLabel(id: number, name: string, km: number): string {
+  const m = routeMeta.value[id]
+  let s = `${name} · ${km.toFixed(1)}km`
+  if (m) {
+    if (m.status === 'READY') s += ` · 已编排${m.events}事件`
+    else if (m.status === 'GENERATING') s += ' · 编排中'
+    else if (m.status === 'FAILED') s += ' · 编排失败'
+    else s += ' · 未编排'
+  }
+  return s
 }
 
 function onSelectRoute(e: Event) {
